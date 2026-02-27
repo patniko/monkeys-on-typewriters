@@ -15,7 +15,7 @@ import {
 } from "./llm-monkey.js";
 
 // ─── Config ─────────────────────────────────────────────────
-const RACE_TIMEOUT_SEC = 120;
+
 const RANDOM_BATCH_SIZE = 200_000;
 const UI_REFRESH_MS = 150;
 
@@ -216,7 +216,7 @@ function renderFinal(
     ? "LLM MONKEY"
     : r.finished
       ? "RANDOM MONKEY (?!)"
-      : "NOBODY (timed out)";
+      : "NOBODY";
 
   const lines = [
     "",
@@ -383,10 +383,6 @@ async function main(): Promise<void> {
       const elapsed = Date.now() - startTime;
       process.stdout.write(`\x1b[2J\x1b[H${render(randomState, llmState, elapsed, target, `${difficulty.emoji} ${difficulty.name}`)}`);
 
-      if (elapsed > RACE_TIMEOUT_SEC * 1000) {
-        raceOver = true;
-        break;
-      }
       await new Promise((r) => setTimeout(r, UI_REFRESH_MS));
     }
   };
