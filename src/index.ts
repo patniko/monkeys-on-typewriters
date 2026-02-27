@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import * as readline from "readline";
 import OpenAI from "openai";
 import chalk from "chalk";
 import {
@@ -17,7 +18,16 @@ import {
 const RACE_TIMEOUT_SEC = 120;
 const RANDOM_BATCH_SIZE = 200_000;
 const UI_REFRESH_MS = 150;
-const MODEL = "gpt-4o-mini";
+const MODELS = [
+  { id: "gpt-4o-mini", name: "GPT-4o Mini", note: "fast & cheap" },
+  { id: "gpt-4o", name: "GPT-4o", note: "smarter, slower" },
+  { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", note: "fastest" },
+  { id: "o4-mini", name: "o4-mini", note: "reasoning model" },
+  { id: "Phi-4", name: "Phi-4", note: "Microsoft, small" },
+  { id: "Llama-3.3-70B-Instruct", name: "Llama 3.3 70B", note: "Meta, large" },
+  { id: "Mistral-Large-2411", name: "Mistral Large", note: "Mistral AI" },
+  { id: "DeepSeek-R1", name: "DeepSeek R1", note: "reasoning model" },
+];
 
 // ─── Token ──────────────────────────────────────────────────
 function getToken(): string {
@@ -221,6 +231,41 @@ async function countdown(): Promise<void> {
   }
 }
 
+// ─── Model selection ────────────────────────────────────────
+async function selectModel(): Promise<string> {
+  console.log("");
+  console.log(chalk.bold.yellow("  🐒 INFINITE MONKEYS vs LLMs — SHAKESPEARE RACE 🤖"));
+  console.log(chalk.gray("  " + "━".repeat(52)));
+  console.log("");
+  console.log(chalk.bold("  Select a model for the LLM monkey:"));
+  console.log("");
+  for (let i = 0; i < MODELS.length; i++) {
+    const m = MODELS[i];
+    const num = chalk.white.bold(`  ${String(i + 1).padStart(2)}.`);
+    const name = chalk.cyan(m.name.padEnd(22));
+    const note = chalk.gray(`(${m.note})`);
+    console.log(`${num} ${name} ${note}`);
+  }
+  console.log("");
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(chalk.white("  Choice [1]: "), (ans) => {
+      rl.close();
+      resolve(ans.trim());
+    });
+  });
+
+  const idx = answer === "" ? 0 : parseInt(answer, 10) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= MODELS.length) {
+    console.log(chalk.yellow("  Invalid choice, using GPT-4o Mini."));
+    return MODELS[0].id;
+  }
+
+  console.log(chalk.green(`  ✓ Using ${MODELS[idx].name}`));
+  return MODELS[idx].id;
+}
+
 // ─── Main ───────────────────────────────────────────────────
 async function main(): Promise<void> {
   const token = getToken();
@@ -229,6 +274,7 @@ async function main(): Promise<void> {
     apiKey: token,
   });
 
+  const model = await selectModel();
   await countdown();
 
   process.stdout.write("\x1b[?25l"); // hide cursor
@@ -247,7 +293,7 @@ async function main(): Promise<void> {
   // LLM monkey — makes API calls
   const llmLoop = async () => {
     while (!raceOver) {
-      llmState = await runLLMAttempt(llmState, client, MODEL);
+      llmState = await runLLMAttempt(llmState, client, model);
       if (llmState.finished) raceOver = true;
     }
   };
