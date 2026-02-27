@@ -1,13 +1,10 @@
-const TARGET = "To be, or not to be";
-const TARGET_CHARS = [...TARGET];
-const TARGET_LEN = TARGET.length;
-
-// Characters that could plausibly appear in the target
-const CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ ,";
-const CHARS = [...CHARSET];
-const CHARSET_SIZE = CHARS.length;
+const BASE_CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ ,";
 
 export interface RandomMonkeyState {
+  targetChars: string[];
+  targetLen: number;
+  chars: string[];
+  charsetSize: number;
   attempts: number;
   bestScore: number;
   bestAttempt: string;
@@ -16,8 +13,15 @@ export interface RandomMonkeyState {
   finished: boolean;
 }
 
-export function createRandomMonkey(): RandomMonkeyState {
+export function createRandomMonkey(target: string): RandomMonkeyState {
+  // Build charset that includes all characters in the target
+  const all = new Set([...BASE_CHARSET, ...target]);
+  const chars = [...all];
   return {
+    targetChars: [...target],
+    targetLen: target.length,
+    chars,
+    charsetSize: chars.length,
     attempts: 0,
     bestScore: 0,
     bestAttempt: "",
@@ -31,28 +35,29 @@ export function runBatch(
   state: RandomMonkeyState,
   batchSize: number,
 ): RandomMonkeyState {
-  const buf: string[] = new Array(TARGET_LEN);
+  const { targetChars, targetLen, chars, charsetSize } = state;
+  const buf: string[] = new Array(targetLen);
 
   for (let i = 0; i < batchSize; i++) {
     let score = 0;
-    for (let j = 0; j < TARGET_LEN; j++) {
-      const c = CHARS[(Math.random() * CHARSET_SIZE) | 0];
+    for (let j = 0; j < targetLen; j++) {
+      const c = chars[(Math.random() * charsetSize) | 0];
       buf[j] = c;
-      if (c === TARGET_CHARS[j]) score++;
+      if (c === targetChars[j]) score++;
     }
     if (score > state.bestScore) {
       state.bestScore = score;
       state.bestAttempt = buf.join("");
-      if (score === TARGET_LEN) {
+      if (score === targetLen) {
         state.finished = true;
         state.attempts += i + 1;
-        state.charsGenerated += (i + 1) * TARGET_LEN;
+        state.charsGenerated += (i + 1) * targetLen;
         return state;
       }
     }
   }
 
   state.attempts += batchSize;
-  state.charsGenerated += batchSize * TARGET_LEN;
+  state.charsGenerated += batchSize * targetLen;
   return state;
 }

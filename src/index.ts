@@ -1,6 +1,5 @@
-import { execSync } from "child_process";
 import * as readline from "readline";
-import OpenAI from "openai";
+import { CopilotClient } from "@github/copilot-sdk";
 import chalk from "chalk";
 import {
   createRandomMonkey,
@@ -10,39 +9,78 @@ import {
 import {
   createLLMMonkey,
   runLLMAttempt,
-  TARGET,
+  buildEvolution,
   type LLMMonkeyState,
+  type DifficultyHints,
 } from "./llm-monkey.js";
 
 // ─── Config ─────────────────────────────────────────────────
 const RACE_TIMEOUT_SEC = 120;
 const RANDOM_BATCH_SIZE = 200_000;
 const UI_REFRESH_MS = 150;
-const MODELS = [
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", note: "fast & cheap" },
-  { id: "gpt-4o", name: "GPT-4o", note: "smarter, slower" },
-  { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", note: "fastest" },
-  { id: "o4-mini", name: "o4-mini", note: "reasoning model" },
-  { id: "Phi-4", name: "Phi-4", note: "Microsoft, small" },
-  { id: "Llama-3.3-70B-Instruct", name: "Llama 3.3 70B", note: "Meta, large" },
-  { id: "Mistral-Large-2411", name: "Mistral Large", note: "Mistral AI" },
-  { id: "DeepSeek-R1", name: "DeepSeek R1", note: "reasoning model" },
+
+interface Difficulty {
+  name: string;
+  emoji: string;
+  target: string;
+  description: string;
+  hints: DifficultyHints;
+}
+
+const DIFFICULTIES: Difficulty[] = [
+  {
+    name: "Easy",
+    emoji: "🟢",
+    target: "To be, or not to be",
+    description: "Hamlet — the most famous line in theater",
+    hints: {
+      classicsPrompt:
+        "Type a famous short quote from a play written before 1700. Output ONLY the exact quote, nothing else, no quotation marks.",
+      finalPrompt:
+        "What is the single most famous short quote from English-language theater? Output ONLY the quote itself, no author, no quotation marks, no commentary.",
+      perfectionPrompt:
+        "What is the single most famous short quote from English-language theater? Be precise with punctuation and commas. Output ONLY the exact quote, no author, no quotation marks, no commentary.",
+    },
+  },
+  {
+    name: "Medium",
+    emoji: "🟡",
+    target: "All the world's a stage",
+    description: "As You Like It — well-known but not the obvious #1",
+    hints: {
+      classicsPrompt:
+        "Type a famous short quote from old English plays that uses a metaphor about life. Output ONLY the exact quote, nothing else, no quotation marks.",
+      finalPrompt:
+        "There is a famous line from an old play that compares all of human life to a theatrical performance. What is the short opening line? Output ONLY the quote, no attribution, no quotation marks.",
+      perfectionPrompt:
+        "There is a famous line from an old play that compares all of human life to a theatrical performance. What is the exact opening clause? Be precise with punctuation and apostrophes. Output ONLY the quote, no attribution, no quotation marks.",
+    },
+  },
+  {
+    name: "Hard",
+    emoji: "🔴",
+    target: "Brevity is the soul of wit",
+    description: "Hamlet — recognizable but not top-of-mind",
+    hints: {
+      classicsPrompt:
+        "Type a famous short quote about wisdom or cleverness from a play written before 1700. Output ONLY the exact quote, nothing else, no quotation marks.",
+      finalPrompt:
+        "There is a famous quote from an old English play about the value of being concise and keeping things short when you speak. What is it? Output ONLY the exact quote, no author, no quotation marks.",
+      perfectionPrompt:
+        "There is a famous quote from an old English play about the value of being concise and keeping things short when you speak. What is the exact quote? Output ONLY the quote, no author, no quotation marks, no period at the end.",
+    },
+  },
 ];
 
-// ─── Token ──────────────────────────────────────────────────
-function getToken(): string {
-  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-  try {
-    return execSync("gh auth token 2>/dev/null", { encoding: "utf-8" }).trim();
-  } catch {
-    console.error(
-      chalk.red("\n  ✖ Could not find a GitHub token.\n") +
-        chalk.gray(
-          "  Set GITHUB_TOKEN or install the gh CLI and run: gh auth login\n",
-        ),
-    );
-    process.exit(1);
-  }
+// ─── Readline helper ────────────────────────────────────────
+function ask(prompt: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(prompt, (ans) => {
+      rl.close();
+      resolve(ans.trim());
+    });
+  });
 }
 
 // ─── Formatting helpers ─────────────────────────────────────
@@ -87,31 +125,35 @@ function render(
   r: RandomMonkeyState,
   l: LLMMonkeyState,
   elapsed: number,
+  target: string,
+  diffName: string,
 ): string {
-  const rPct = r.bestScore / TARGET.length;
-  const lPct = l.bestScore / TARGET.length;
+  const tLen = target.length;
+  const rPct = r.bestScore / tLen;
+  const lPct = l.bestScore / tLen;
   const sec = Math.max(0.1, elapsed / 1000);
 
   const lines = [
     "",
     chalk.bold.yellow("  🐒 INFINITE MONKEYS vs LLMs — SHAKESPEARE RACE 🤖"),
     chalk.gray("  " + "━".repeat(52)),
-    `  Target: ${chalk.white.bold(`"${TARGET}"`)}          ${chalk.gray(`⏱  ${clock(elapsed)}`)}`,
+    `  Target: ${chalk.white.bold(`"${target}"`)}`,
+    `  ${chalk.gray(`Difficulty: ${diffName}`)}          ${chalk.gray(`⏱  ${clock(elapsed)}`)}`,
     "",
     // ── Random monkey ──
     chalk.red.bold("  🐒 RANDOM MONKEY"),
     `     Attempts:  ${chalk.white(fmt(r.attempts))}  ${chalk.gray("(" + fmt(Math.round(r.attempts / sec)) + "/sec)")}`,
-    `     Best:      ${chalk.white(r.bestScore + "/" + TARGET.length + " chars")}  ${chalk.gray("(" + (rPct * 100).toFixed(1) + "%)")}`,
-    `     Best try:  "${r.bestAttempt ? colorize(r.bestAttempt, TARGET) : chalk.gray("...")}"`,
+    `     Best:      ${chalk.white(r.bestScore + "/" + tLen + " chars")}  ${chalk.gray("(" + (rPct * 100).toFixed(1) + "%)")}`,
+    `     Best try:  "${r.bestAttempt ? colorize(r.bestAttempt, target) : chalk.gray("...")}"`,
     `     Progress:  [${bar(rPct)}] ${(rPct * 100).toFixed(1)}%`,
     "",
     // ── LLM monkey ──
     chalk.blue.bold("  🤖 LLM MONKEY") +
       chalk.cyan(`  ⟨${l.evolutionEmoji} ${l.evolutionName}⟩`),
-    `     Attempts:  ${chalk.white(String(l.attempts))}  ${chalk.gray("(" + fmt(l.tokensUsed) + " tokens)")}`,
-    `     Best:      ${chalk.white(l.bestScore + "/" + TARGET.length + " chars")}  ${chalk.gray("(" + (lPct * 100).toFixed(1) + "%)")}` +
+    `     Attempts:  ${chalk.white(String(l.attempts))}`,
+    `     Best:      ${chalk.white(l.bestScore + "/" + tLen + " chars")}  ${chalk.gray("(" + (lPct * 100).toFixed(1) + "%)")}` +
       (l.finished ? chalk.green.bold("  ✓ MATCH!") : ""),
-    `     Best try:  "${l.bestAttempt ? colorize(l.bestAttempt, TARGET) : chalk.gray("...")}"`,
+    `     Best try:  "${l.bestAttempt ? colorize(l.bestAttempt, target) : chalk.gray("...")}"`,
     `     Progress:  [${bar(lPct)}] ${(lPct * 100).toFixed(1)}%`,
     "",
   ];
@@ -119,7 +161,7 @@ function render(
   // Fun math extrapolation
   if (r.attempts > 1000) {
     const rate = r.attempts / sec;
-    const totalPossible = Math.pow(54, TARGET.length);
+    const totalPossible = Math.pow(r.charsetSize, tLen);
     const years = totalPossible / rate / 3.154e7;
     const exp = Math.log10(years);
     lines.push(
@@ -161,10 +203,12 @@ function renderFinal(
   r: RandomMonkeyState,
   l: LLMMonkeyState,
   elapsed: number,
+  target: string,
 ): string {
+  const tLen = target.length;
   const sec = Math.max(0.1, elapsed / 1000);
   const rate = r.attempts / sec;
-  const totalPossible = Math.pow(54, TARGET.length);
+  const totalPossible = Math.pow(r.charsetSize, tLen);
   const years = totalPossible / rate / 3.154e7;
   const exp = Math.log10(years);
 
@@ -184,13 +228,12 @@ function renderFinal(
     chalk.red.bold("  🐒 Random Monkey"),
     `     Total attempts:   ${fmt(r.attempts)}`,
     `     Characters typed: ${fmt(r.charsGenerated)}`,
-    `     Best match:       ${((r.bestScore / TARGET.length) * 100).toFixed(1)}% (${r.bestScore}/${TARGET.length} chars)`,
+    `     Best match:       ${((r.bestScore / tLen) * 100).toFixed(1)}% (${r.bestScore}/${tLen} chars)`,
     `     Best attempt:     "${r.bestAttempt}"`,
     `     Est. time needed: ${chalk.red("~10^" + exp.toFixed(0) + " years")}`,
     "",
     chalk.blue.bold("  🤖 LLM Monkey"),
     `     Total attempts:   ${l.attempts}`,
-    `     Tokens used:      ${fmt(l.tokensUsed)}`,
     `     Match found in:   ${chalk.green(clock(Date.now() - l.startTime))}`,
     "",
     chalk.bold("  🧬 Full Evolution Journey:"),
@@ -232,65 +275,92 @@ async function countdown(): Promise<void> {
 }
 
 // ─── Model selection ────────────────────────────────────────
-async function selectModel(): Promise<string> {
-  console.log("");
-  console.log(chalk.bold.yellow("  🐒 INFINITE MONKEYS vs LLMs — SHAKESPEARE RACE 🤖"));
-  console.log(chalk.gray("  " + "━".repeat(52)));
+async function selectModel(client: CopilotClient): Promise<string> {
+  console.log(chalk.gray("\n  Fetching available models..."));
+  const models = await client.listModels();
+
   console.log("");
   console.log(chalk.bold("  Select a model for the LLM monkey:"));
   console.log("");
-  for (let i = 0; i < MODELS.length; i++) {
-    const m = MODELS[i];
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i];
     const num = chalk.white.bold(`  ${String(i + 1).padStart(2)}.`);
-    const name = chalk.cyan(m.name.padEnd(22));
-    const note = chalk.gray(`(${m.note})`);
-    console.log(`${num} ${name} ${note}`);
+    const name = chalk.cyan(m.name.padEnd(30));
+    const id = chalk.gray(`(${m.id})`);
+    console.log(`${num} ${name} ${id}`);
   }
   console.log("");
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await new Promise<string>((resolve) => {
-    rl.question(chalk.white("  Choice [1]: "), (ans) => {
-      rl.close();
-      resolve(ans.trim());
-    });
-  });
+  const answer = await ask(chalk.white("  Choice [1]: "));
 
   const idx = answer === "" ? 0 : parseInt(answer, 10) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= MODELS.length) {
-    console.log(chalk.yellow("  Invalid choice, using GPT-4o Mini."));
-    return MODELS[0].id;
+  if (isNaN(idx) || idx < 0 || idx >= models.length) {
+    console.log(chalk.yellow(`  Invalid choice, using ${models[0].name}.`));
+    return models[0].id;
   }
 
-  console.log(chalk.green(`  ✓ Using ${MODELS[idx].name}`));
-  return MODELS[idx].id;
+  console.log(chalk.green(`  ✓ Using ${models[idx].name}`));
+  return models[idx].id;
+}
+
+// ─── Difficulty selection ───────────────────────────────────
+async function selectDifficulty(): Promise<Difficulty> {
+  console.log("");
+  console.log(chalk.bold("  Select difficulty:"));
+  console.log("");
+  for (let i = 0; i < DIFFICULTIES.length; i++) {
+    const d = DIFFICULTIES[i];
+    const num = chalk.white.bold(`  ${i + 1}.`);
+    const name = chalk.cyan(`${d.emoji} ${d.name}`.padEnd(16));
+    const desc = chalk.gray(d.description);
+    console.log(`${num} ${name} ${desc}`);
+  }
+  console.log("");
+
+  const answer = await ask(chalk.white("  Choice [1]: "));
+
+  const idx = answer === "" ? 0 : parseInt(answer, 10) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= DIFFICULTIES.length) {
+    console.log(chalk.yellow("  Invalid choice, using Easy."));
+    return DIFFICULTIES[0];
+  }
+
+  console.log(chalk.green(`  ✓ ${DIFFICULTIES[idx].emoji} ${DIFFICULTIES[idx].name}: "${DIFFICULTIES[idx].target}"`));
+  return DIFFICULTIES[idx];
 }
 
 // ─── Main ───────────────────────────────────────────────────
 async function main(): Promise<void> {
-  const token = getToken();
-  const client = new OpenAI({
-    baseURL: "https://models.inference.ai.azure.com",
-    apiKey: token,
-  });
+  console.log("");
+  console.log(chalk.bold.yellow("  🐒 INFINITE MONKEYS vs LLMs — SHAKESPEARE RACE 🤖"));
+  console.log(chalk.gray("  " + "━".repeat(52)));
 
-  const model = await selectModel();
+  const client = new CopilotClient({ logLevel: "error" });
+  await client.start();
+
+  const model = await selectModel(client);
+  const difficulty = await selectDifficulty();
+  const target = difficulty.target;
+  const evolution = buildEvolution(difficulty.hints);
+
   await countdown();
 
   process.stdout.write("\x1b[?25l"); // hide cursor
-  const cleanup = () => process.stdout.write("\x1b[?25h\n");
-  process.on("exit", cleanup);
-  process.on("SIGINT", () => {
-    cleanup();
+  const cleanup = async () => {
+    process.stdout.write("\x1b[?25h\n");
+    await client.stop().catch(() => {});
+  };
+  process.on("SIGINT", async () => {
+    await cleanup();
     process.exit(0);
   });
 
-  let randomState = createRandomMonkey();
-  let llmState = createLLMMonkey();
+  let randomState = createRandomMonkey(target);
+  let llmState = createLLMMonkey(target, evolution);
   const startTime = Date.now();
   let raceOver = false;
 
-  // LLM monkey — makes API calls
+  // LLM monkey — makes API calls via Copilot SDK
   const llmLoop = async () => {
     while (!raceOver) {
       llmState = await runLLMAttempt(llmState, client, model);
@@ -311,7 +381,7 @@ async function main(): Promise<void> {
   const uiLoop = async () => {
     while (!raceOver) {
       const elapsed = Date.now() - startTime;
-      process.stdout.write(`\x1b[2J\x1b[H${render(randomState, llmState, elapsed)}`);
+      process.stdout.write(`\x1b[2J\x1b[H${render(randomState, llmState, elapsed, target, `${difficulty.emoji} ${difficulty.name}`)}`);
 
       if (elapsed > RACE_TIMEOUT_SEC * 1000) {
         raceOver = true;
@@ -326,9 +396,11 @@ async function main(): Promise<void> {
 
   // Show final results
   const elapsed = Date.now() - startTime;
-  process.stdout.write(`\x1b[2J\x1b[H${render(randomState, llmState, elapsed)}`);
-  process.stdout.write(renderFinal(randomState, llmState, elapsed));
+  process.stdout.write(`\x1b[2J\x1b[H${render(randomState, llmState, elapsed, target, `${difficulty.emoji} ${difficulty.name}`)}`);
+  process.stdout.write(renderFinal(randomState, llmState, elapsed, target));
   process.stdout.write("\x1b[?25h"); // show cursor
+
+  await client.stop().catch(() => {});
 }
 
 main().catch((err) => {
