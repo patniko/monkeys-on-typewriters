@@ -17,7 +17,7 @@ const EVOLUTION: EvolutionLevel[] = [
     emoji: "🐒",
     prompt:
       "You are a monkey hitting random keys on a typewriter. Produce exactly 20 characters of random gibberish with no real words. Output ONLY the characters, nothing else.",
-    maxAttempts: 2,
+    maxAttempts: 3,
     temperature: 1.5,
   },
   {
@@ -25,40 +25,56 @@ const EVOLUTION: EvolutionLevel[] = [
     emoji: "🔤",
     prompt:
       "You are a monkey who has started to notice patterns in human writing. Type a short English-sounding phrase of about 20 characters. It can be nonsensical. Output ONLY the phrase.",
-    maxAttempts: 2,
+    maxAttempts: 3,
     temperature: 1.2,
   },
   {
-    name: "Discovering Drama",
-    emoji: "🎭",
+    name: "Forming Sentences",
+    emoji: "✏️",
     prompt:
-      "You are a monkey who has been watching humans perform in a theater. Type a short dramatic phrase you might have overheard, around 20 characters. Output ONLY the phrase.",
-    maxAttempts: 2,
+      "Write a short philosophical-sounding sentence, around 20 characters. It does not need to be a real quote. Output ONLY the sentence, nothing else.",
+    maxAttempts: 3,
     temperature: 1.0,
   },
   {
-    name: "Reading Shakespeare",
-    emoji: "📚",
+    name: "Pondering Existence",
+    emoji: "🤔",
     prompt:
-      "You are a monkey who found a book of Shakespeare. Type a famous short Shakespeare quote from memory. You might not remember it perfectly. Output ONLY the quote, no attribution, no quotation marks.",
-    maxAttempts: 3,
+      "Write a very short phrase about whether something exists or doesn't. About 20 characters. Output ONLY the phrase, no quotation marks.",
+    maxAttempts: 4,
+    temperature: 1.0,
+  },
+  {
+    name: "Discovering Theater",
+    emoji: "🎭",
+    prompt:
+      "Write a short dramatic line that a character on stage might say. Around 20 characters. Output ONLY the line, no quotation marks.",
+    maxAttempts: 4,
     temperature: 0.9,
   },
   {
-    name: "Shakespeare Scholar",
+    name: "Reading Old Books",
+    emoji: "📚",
+    prompt:
+      "Type a short, well-known quote from old English literature. Around 20 characters. Output ONLY the quote, no attribution, no quotation marks.",
+    maxAttempts: 5,
+    temperature: 0.8,
+  },
+  {
+    name: "Studying the Classics",
     emoji: "🎓",
     prompt:
-      "Type a very famous short Shakespeare quote about existence. Output ONLY the exact quote, nothing else, no quotation marks.",
-    maxAttempts: 3,
+      "Type a famous short quote from a play written before 1700. Output ONLY the exact quote, nothing else, no quotation marks.",
+    maxAttempts: 5,
     temperature: 0.7,
   },
   {
-    name: "Hamlet Expert",
+    name: "Deep Contemplation",
     emoji: "🧠",
     prompt:
-      "What is the most famous opening of a soliloquy in Hamlet? Output ONLY the first clause (before any comma that follows the main thought), no quotation marks.",
-    maxAttempts: 5,
-    temperature: 0.3,
+      "What is the single most famous short quote from English-language theater? Output ONLY the quote itself, no author, no quotation marks, no commentary.",
+    maxAttempts: 8,
+    temperature: 0.5,
   },
 ];
 
